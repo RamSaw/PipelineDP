@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Differential privacy computing of count, sum, mean, variance."""
+from typing import Iterable, Any
 
 import numpy as np
 import pipeline_dp
@@ -434,3 +435,22 @@ def compute_dp_var(count: int, sum: float, sum_squares: float,
 
     dp_var = dp_mean_squares - dp_mean**2
     return dp_count, dp_mean * dp_count, dp_mean, dp_var
+
+
+def select_best_with_exponential_mechanism(values: Iterable[Any], score, score_sensitivity: float,
+                                           dp_params: MeanVarParams) -> Any:
+    """Selects best value in a DP way based on given scoring function.
+
+    Args:
+        values: values to choose from.
+        score: a function that returns score given a value.
+        score_sensitivity: sensitivity of the scoring function.
+        dp_params: The parameters used at computing the noise.
+
+    Returns:
+        Object that has to be chosen.
+    """
+    weights = map(lambda value: dp_params.eps * score(value) / (2 * score_sensitivity), values)
+    norm = sum(weights)
+    probabilities = map(lambda weight: weight / norm, weights)
+    return np.random.default_rng().choice(values, p=probabilities)
