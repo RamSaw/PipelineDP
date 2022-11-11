@@ -129,7 +129,7 @@ class CombinerParams:
     def __init__(self, spec: budget_accounting.MechanismSpec,
                  aggregate_params: pipeline_dp.AggregateParams):
         self._mechanism_spec = spec
-        self.aggregate_params = copy.copy(aggregate_params)
+        self.aggregate_params = aggregate_params
 
     @property
     def eps(self):

@@ -12,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """DP aggregations."""
+import copy
 import dataclasses
 import functools
+from collections import defaultdict, Counter
 from typing import Any, Callable, Tuple
 import numpy as np
 
 import pipeline_dp
-from pipeline_dp import combiners
+from pipeline_dp import combiners, NoiseKind
 import pipeline_dp.report_generator as report_generator
 
 import pydp.algorithms.partition_selection as partition_selection
 
+from pipeline_dp.dp_computations import compute_mean_amount_of_noise
 
 @dataclasses.dataclass
 class DataExtractors:
@@ -48,6 +51,25 @@ class DPEngine:
 
     def _add_report_stage(self, text):
         self._report_generators[-1].add_stage(text)
+
+    def calculate_contribution_bounds(self, col, calculation_params: pipeline_dp.ContributionBoundsDpCalculationParameters,
+                                      params: pipeline_dp.AggregateParams,
+                                      data_extractors: DataExtractors):
+        self._report_generators.append(report_generator.ReportGenerator(calculation_params))
+
+        if params.public_partitions is not None:
+            col = self._drop_not_public_partitions(col,
+                                                   params.public_partitions,
+                                                   data_extractors)
+
+        # Extract the columns.
+        col = self._backend.map(
+            col, lambda row: (data_extractors.privacy_id_extractor(row),
+                              data_extractors.partition_extractor(row),
+                              data_extractors.value_extractor(row)),
+            "Extract (privacy_id, partition_key, value))")
+        # col : (privacy_id, partition_key, value)
+        return self._autotune_contribution_bounds(col, calculation_params, params)
 
     def aggregate(self, col, params: pipeline_dp.AggregateParams,
                   data_extractors: DataExtractors):
@@ -98,8 +120,17 @@ class DPEngine:
                               data_extractors.value_extractor(row)),
             "Extract (privacy_id, partition_key, value))")
         # col : (privacy_id, partition_key, value)
-        col = self._bound_contributions(col, params.max_partitions_contributed,
-                                        params.max_contributions_per_partition,
+        if params.auto_tune_contribution_bounds and params.public_partitions is not None:
+            (max_partitions_contributed, max_contributions_per_partition) = \
+                self._autotune_contribution_bounds(self._transform_input(col_input, params, data_extractors), params, self._budget_accountant)
+        else:
+            (max_partitions_contributed, max_contributions_per_partition) = (params.max_partitions_contributed,
+                                                                             params.max_contributions_per_partition)
+        col = self._transform_input(col_input, params, data_extractors)
+        max_partitions_contributed = int(max_partitions_contributed)
+        params.max_partitions_contributed = max_partitions_contributed
+        col = self._bound_contributions(col, max_partitions_contributed,
+                                        max_contributions_per_partition,
                                         combiner.create_accumulator)
         # col : ((privacy_id, partition_key), accumulator)
 
@@ -261,6 +292,38 @@ class DPEngine:
         return self._backend.flatten(
             col, empty_accumulators,
             "Join public partitions with partitions from data")
+
+    def _autotune_contribution_bounds(self, col, calculation_params: pipeline_dp.ContributionBoundsDpCalculationParameters, params: pipeline_dp.AggregateParams) -> Tuple[int, int]:
+        # col : (privacy_id, partition_key, value)
+        col = self._backend.map_tuple(col, lambda pid, pk, v: (pid, pk), "Rekey to (privacy_id, partition_key)")
+        # col: (privacy_id, [partition_keys])
+        col = self._backend.group_by_key(col, "Group partition keys by privacy id")
+        # col: (privacy_id, number_of_partition_keys)
+        col = self._backend.map_values(col, lambda partition_keys: len(set(partition_keys)), "Count distinct partition keys per privacy id")
+        contributions = self._backend.values(col)
+
+        budget_spec = self._budget_accountant.request_budget(
+                          NoiseKind.LAPLACE.convert_to_mechanism_type(), weight=calculation_params.budget_weight)
+
+        def impact_noise(k):
+            return len(params.public_partitions) * compute_mean_amount_of_noise(self._budget_accountant._total_eps * (1 - calculation_params.budget_weight),
+                                                                                self._budget_accountant.super().total_delta * (1 - calculation_params.budget_weight), k,
+                                                                                1, params.noise_kind)
+
+        def impact_dropped(k):
+            capped_contributions = self._backend.map(contributions, lambda contribution: max(min(contribution, params.max_partitions_contributed) - k, 0))
+            return sum(capped_contributions)
+
+        def score(k):
+            return -len(params.public_partitions) * impact_noise(k) - impact_dropped(k)
+
+        possible_contribution_bounds = range(1, calculation_params.max_partitions_contributed_upper_bound + 1)
+        scores = map(lambda k: score(k), possible_contribution_bounds)
+        self._budget_accountant.compute_budgets()
+        weights = map(lambda score: np.exp(score * budget_spec.eps() / (2 * params.max_partitions_contributed)), scores)
+        total_weight = sum(weights)
+        probabilities = map(lambda weight: weight / total_weight, weights)
+        return np.random.default_rng().choice(possible_contribution_bounds, p=probabilities), params.max_contributions_per_partition
 
     def _bound_contributions(self, col, max_partitions_contributed: int,
                              max_contributions_per_partition: int,

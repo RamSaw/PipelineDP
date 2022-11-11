@@ -91,6 +91,61 @@ def compute_sigma(eps: float, delta: float, l2_sensitivity: float):
     return dp_mechanisms.GaussianMechanism(eps, delta, l2_sensitivity).std
 
 
+def compute_absolute_laplace_noise_mean(eps: float, l1_sensitivity: float) -> float:
+    """Calculates E[|X|] where X = Laplace(l1_sensitivity / eps).
+
+    Args:
+        eps: The epsilon value.
+        l1_sensitivity: The L1 sensitivity.
+
+    Returns:
+        Mean of the absolute Laplace distribution.
+    """
+    return l1_sensitivity / eps
+
+
+def compute_absolute_gaussian_noise_mean(eps: float, delta: float, l2_sensitivity: float) -> float:
+    """Calculates E[|X|] where X is normal distribution.
+
+    Args:
+        eps: The epsilon value.
+        delta: The delta value.
+        l2_sensitivity: The L2 sensitivity.
+
+    Returns:
+        Mean of the half-normal distribution.
+    """
+    return compute_sigma(eps, delta, l2_sensitivity) * np.sqrt(2 / np.pi)
+
+
+def compute_mean_amount_of_noise(eps: float,
+    delta: float,
+    l0_sensitivity: float,
+    linf_sensitivity: float,
+    noise_kind: NoiseKind) -> float:
+    """Calculates E[|X|] where X is the distribution of the noise.
+
+    Args:
+        eps: The epsilon value.
+        delta: The delta value.
+        l0_sensitivity: The L0 sensitivity.
+        linf_sensitivity: The Linf sensitivity.
+        noise_kind: The kind of noise used.
+
+    Returns:
+        Mean of the absolute value of the noise.
+    """
+    if noise_kind == NoiseKind.LAPLACE:
+        l1_sensitivity = compute_l1_sensitivity(l0_sensitivity,
+                                                linf_sensitivity)
+        return compute_absolute_laplace_noise_mean(eps, l1_sensitivity)
+    if noise_kind == NoiseKind.GAUSSIAN:
+        l2_sensitivity = compute_l2_sensitivity(l0_sensitivity,
+                                                linf_sensitivity)
+        return compute_absolute_gaussian_noise_mean(eps, delta, l2_sensitivity)
+    raise ValueError("Noise kind must be either Laplace or Gaussian.")
+
+
 def apply_laplace_mechanism(value: float, eps: float, l1_sensitivity: float):
     """Applies the Laplace mechanism to the value.
 

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from pipeline_dp.aggregate_params import AggregateParams
+from pipeline_dp.aggregate_params import ContributionBoundsDpCalculationParameters
 from pipeline_dp.aggregate_params import CountParams
 from pipeline_dp.aggregate_params import MechanismType
 from pipeline_dp.aggregate_params import Metrics

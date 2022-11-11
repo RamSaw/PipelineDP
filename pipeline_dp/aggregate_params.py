@@ -53,6 +53,13 @@ class NormKind(Enum):
 
 
 @dataclass
+class ContributionBoundsDpCalculationParameters:
+    max_partitions_contributed_upper_bound: int
+    max_contributions_per_partition: int
+    budget_weight: float
+
+
+@dataclass
 class AggregateParams:
     """Specifies parameters for function DPEngine.aggregate()
 
@@ -63,6 +70,9 @@ class AggregateParams:
       unit of privacy (e.g., a user) can contribute.
     max_contributions_per_partition: A bound on the number of times one unit of
       privacy (e.g. a user) can contribute to a partition.
+    auto_tune_contribution_bounds: If True then max_partitions_contributed and max_contributions_per_partition are
+    auto-tuned. The values that are given in max_partitions_contributed and max_contributions_per_partition get
+    different meanings in this case: they mean the reasonable upper bounds for these parameters.
     budget_weight: Relative weight of the privacy budget allocated to this
       aggregation.
     min_value: Lower bound on each value.
@@ -75,8 +85,10 @@ class AggregateParams:
   """
 
     metrics: Iterable[Metrics]
-    max_partitions_contributed: int
-    max_contributions_per_partition: int
+    max_partitions_contributed: int = None
+    max_contributions_per_partition: int = None
+    auto_tune_contribution_bounds: bool = False
+    auto_tune_budget_weight: float = 0
     budget_weight: float = 1
     low: float = None  # deprecated
     high: float = None  # deprecated
@@ -99,14 +111,16 @@ class AggregateParams:
                                   or Metrics.VARIANCE in self.metrics
             if not isinstance(self.max_partitions_contributed,
                               int) or self.max_partitions_contributed <= 0:
-                raise ValueError(
-                    "params.max_partitions_contributed must be set "
-                    "to a positive integer")
+                a = 0
+                #raise ValueError(
+                #    "params.max_partitions_contributed must be set "
+                #    "to a positive integer")
             if not isinstance(self.max_contributions_per_partition,
                               int) or self.max_contributions_per_partition <= 0:
-                raise ValueError(
-                    "params.max_contributions_per_partition must be set "
-                    "to a positive integer")
+                a = 0
+                # raise ValueError(
+                #    "params.max_contributions_per_partition must be set "
+                #    "to a positive integer")
             if needs_min_max_value and (self.min_value is None or
                                         self.max_value is None):
                 raise ValueError(

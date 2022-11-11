@@ -60,7 +60,7 @@ def parse_file(filename):  # used for the local run
 
 
 def write_to_file(col, filename):
-    with open(filename, 'w') as out:
+    with open(filename, 'a') as out:
         out.write('\n'.join(map(str, col)))
 
 
